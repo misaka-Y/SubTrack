@@ -1,0 +1,537 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Plus, Search, Bell, LayoutDashboard, CreditCard, PieChart as PieIcon, Settings, User, Download, Upload, Edit3 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Subscription, SpendingStats, UserProfile } from './types';
+import { SubscriptionCard } from './components/SubscriptionCard';
+import { StatsOverview } from './components/StatsOverview';
+import { AddSubscriptionModal } from './components/AddSubscriptionModal';
+import { ProfileEditModal } from './components/ProfileEditModal';
+import { cn } from './lib/utils';
+
+const STORAGE_KEYS = {
+  SUBSCRIPTIONS: 'subtrack_subscriptions',
+  USER_PROFILE: 'subtrack_user_profile'
+};
+
+const DEFAULT_USER: UserProfile = {
+  name: 'Felix',
+  email: '2048779651qq@gmail.com',
+  avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix'
+};
+
+const MOCK_SUBSCRIPTIONS: Subscription[] = [
+  {
+    id: '1',
+    name: 'Netflix',
+    price: 45,
+    currency: 'CNY',
+    cycle: 'monthly',
+    startDate: '2024-01-15',
+    nextBillingDate: '2024-03-15',
+    status: 'active',
+    category: '娱乐',
+    color: '#E50914'
+  },
+  {
+    id: '2',
+    name: 'Spotify',
+    price: 15,
+    currency: 'CNY',
+    cycle: 'monthly',
+    startDate: '2024-02-01',
+    nextBillingDate: '2024-04-01',
+    status: 'active',
+    category: '娱乐',
+    color: '#1DB954'
+  },
+  {
+    id: '3',
+    name: 'ChatGPT Plus',
+    price: 140,
+    currency: 'CNY',
+    cycle: 'monthly',
+    startDate: '2023-12-10',
+    nextBillingDate: '2024-03-10',
+    status: 'active',
+    category: '生产力',
+    color: '#10A37F'
+  },
+  {
+    id: '4',
+    name: 'iCloud+',
+    price: 6,
+    currency: 'CNY',
+    cycle: 'monthly',
+    startDate: '2023-05-20',
+    nextBillingDate: '2024-03-20',
+    status: 'active',
+    category: '生活',
+    color: '#007AFF'
+  },
+  {
+    id: '5',
+    name: '百度网盘',
+    price: 30,
+    currency: 'CNY',
+    cycle: 'monthly',
+    startDate: '2023-01-01',
+    endDate: '2024-01-01',
+    nextBillingDate: '2024-01-01',
+    status: 'expired',
+    category: '生产力',
+    color: '#0066FF'
+  }
+];
+
+type TabType = 'dashboard' | 'subscriptions' | 'profile';
+
+export default function App() {
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.SUBSCRIPTIONS);
+    return saved ? JSON.parse(saved) : MOCK_SUBSCRIPTIONS;
+  });
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.USER_PROFILE);
+    return saved ? JSON.parse(saved) : DEFAULT_USER;
+  });
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = useState<'all' | 'active' | 'paused' | 'cancelled' | 'expired'>('all');
+  const [currentTab, setCurrentTab] = useState<TabType>('dashboard');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.SUBSCRIPTIONS, JSON.stringify(subscriptions));
+  }, [subscriptions]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.USER_PROFILE, JSON.stringify(userProfile));
+  }, [userProfile]);
+
+  const stats = useMemo<SpendingStats>(() => {
+    const activeSubs = subscriptions.filter(s => s.status === 'active');
+    
+    const monthlyTotal = activeSubs.reduce((acc, s) => {
+      switch (s.cycle) {
+        case 'monthly': return acc + s.price;
+        case 'quarterly': return acc + s.price / 3;
+        case 'semi-annually': return acc + s.price / 6;
+        case 'yearly': return acc + s.price / 12;
+        default: return acc;
+      }
+    }, 0);
+
+    // Category Breakdown
+    const categoryMap = new Map<string, { value: number; color: string }>();
+    activeSubs.forEach(s => {
+      let monthlyPrice = 0;
+      switch (s.cycle) {
+        case 'monthly': monthlyPrice = s.price; break;
+        case 'quarterly': monthlyPrice = s.price / 3; break;
+        case 'semi-annually': monthlyPrice = s.price / 6; break;
+        case 'yearly': monthlyPrice = s.price / 12; break;
+      }
+      const existing = categoryMap.get(s.category) || { value: 0, color: s.color };
+      categoryMap.set(s.category, { 
+        value: existing.value + monthlyPrice, 
+        color: existing.color 
+      });
+    });
+
+    const categoryBreakdown = Array.from(categoryMap.entries()).map(([name, data]) => ({
+      name,
+      value: data.value,
+      color: data.color
+    }));
+
+    // Item Breakdown
+    const itemBreakdown = activeSubs.map(s => {
+      let monthlyPrice = 0;
+      switch (s.cycle) {
+        case 'monthly': monthlyPrice = s.price; break;
+        case 'quarterly': monthlyPrice = s.price / 3; break;
+        case 'semi-annually': monthlyPrice = s.price / 6; break;
+        case 'yearly': monthlyPrice = s.price / 12; break;
+      }
+      return {
+        name: s.name,
+        value: monthlyPrice,
+        color: s.color
+      };
+    }).sort((a, b) => b.value - a.value);
+    
+    return {
+      monthlyTotal,
+      yearlyTotal: monthlyTotal * 12,
+      activeCount: activeSubs.length,
+      categoryBreakdown,
+      itemBreakdown
+    };
+  }, [subscriptions]);
+
+  const categories = useMemo(() => {
+    const allCats = subscriptions.map(s => s.category);
+    return Array.from(new Set(allCats));
+  }, [subscriptions]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  const filteredSubscriptions = useMemo(() => {
+    return subscriptions.filter(sub => {
+      const matchesSearch = sub.name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesTab = activeTab === 'all' || sub.status === activeTab;
+      const matchesCategory = selectedCategory === 'all' || sub.category === selectedCategory;
+      return matchesSearch && matchesTab && matchesCategory;
+    });
+  }, [subscriptions, searchQuery, activeTab, selectedCategory]);
+
+  const handleSaveSubscription = (data: Omit<Subscription, 'id'> | Subscription) => {
+    if ('id' in data) {
+      setSubscriptions(subs => subs.map(s => s.id === data.id ? (data as Subscription) : s));
+    } else {
+      const subWithId: Subscription = {
+        ...data,
+        id: Math.random().toString(36).substr(2, 9)
+      } as Subscription;
+      setSubscriptions([...subscriptions, subWithId]);
+    }
+  };
+
+  const handleEdit = (sub: Subscription) => {
+    setEditingSubscription(sub);
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = (id: string) => {
+    if (confirm('确定要删除这条订阅记录吗？')) {
+      setSubscriptions(subs => subs.filter(s => s.id !== id));
+    }
+  };
+
+  const handleStatusChange = (id: string, status: Subscription['status']) => {
+    setSubscriptions(subs => subs.map(s => s.id === id ? { ...s, status } : s));
+  };
+
+  const openAddModal = () => {
+    setEditingSubscription(null);
+    setIsModalOpen(true);
+  };
+
+  const handleExport = () => {
+    const data = JSON.stringify({ subscriptions, userProfile }, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `subtrack_backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.subscriptions && Array.isArray(data.subscriptions)) {
+          setSubscriptions(data.subscriptions);
+          if (data.userProfile) setUserProfile(data.userProfile);
+          alert('数据导入成功！');
+        } else {
+          alert('无效的备份文件格式');
+        }
+      } catch (err) {
+        alert('解析备份文件失败');
+      }
+    };
+    reader.readAsText(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  return (
+    <div className="min-h-screen pb-24 bg-slate-50">
+      {/* Header */}
+      <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold">S</div>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight">SubTrack</h1>
+          </div>
+          <div className="flex items-center gap-3">
+            <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors relative">
+              <Bell size={20} />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-4 pt-6">
+        <AnimatePresence mode="wait">
+          {currentTab === 'dashboard' && (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">总览</h2>
+                  <p className="text-slate-500 text-sm">您的订阅支出概况</p>
+                </div>
+              </div>
+              <StatsOverview stats={stats} />
+            </motion.div>
+          )}
+
+          {currentTab === 'subscriptions' && (
+            <motion.div
+              key="subscriptions"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-900">订阅列表</h2>
+                  <p className="text-slate-500 text-sm">管理您的所有服务</p>
+                </div>
+                <button 
+                  onClick={openAddModal}
+                  className="p-2 bg-blue-600 text-white rounded-xl shadow-lg shadow-blue-100"
+                >
+                  <Plus size={24} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex flex-col gap-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                    <input 
+                      type="text" 
+                      placeholder="搜索订阅..."
+                      className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-1 p-1 bg-slate-200/50 rounded-xl w-full overflow-x-auto no-scrollbar">
+                    {(['all', 'active', 'paused', 'cancelled', 'expired'] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={cn(
+                          "px-4 py-2 rounded-lg text-xs font-medium transition-all whitespace-nowrap flex-1",
+                          activeTab === tab 
+                            ? "bg-white text-slate-900 shadow-sm" 
+                            : "text-slate-500 hover:text-slate-700"
+                        )}
+                      >
+                        {tab === 'all' ? '全部' : tab === 'active' ? '活跃' : tab === 'paused' ? '暂停' : tab === 'cancelled' ? '取消' : '过期'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                    <button
+                      onClick={() => setSelectedCategory('all')}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-xs font-medium border transition-all whitespace-nowrap",
+                        selectedCategory === 'all' 
+                          ? "bg-blue-600 border-blue-600 text-white" 
+                          : "bg-white border-slate-200 text-slate-500 hover:border-blue-300"
+                      )}
+                    >
+                      所有分类
+                    </button>
+                    {categories.map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setSelectedCategory(cat)}
+                        className={cn(
+                          "px-3 py-1 rounded-full text-xs font-medium border transition-all whitespace-nowrap",
+                          selectedCategory === cat 
+                            ? "bg-blue-600 border-blue-600 text-white" 
+                            : "bg-white border-slate-200 text-slate-500 hover:border-blue-300"
+                        )}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredSubscriptions.map((sub) => (
+                    <SubscriptionCard 
+                      key={sub.id} 
+                      subscription={sub} 
+                      onStatusChange={handleStatusChange}
+                      onEdit={handleEdit}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                  {filteredSubscriptions.length === 0 && (
+                    <div className="col-span-full py-20 text-center">
+                      <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 text-slate-400 mb-4">
+                        <Search size={32} />
+                      </div>
+                      <h3 className="text-lg font-semibold text-slate-900">未找到相关订阅</h3>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {currentTab === 'profile' && (
+            <motion.div
+              key="profile"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-8"
+            >
+              <div className="text-center pt-8">
+                <div className="relative inline-block">
+                  <div className="w-24 h-24 rounded-full bg-slate-200 border-4 border-white shadow-xl overflow-hidden mx-auto">
+                    <img src={userProfile.avatar} alt="Avatar" referrerPolicy="no-referrer" />
+                  </div>
+                  <button 
+                    onClick={() => setIsProfileModalOpen(true)}
+                    className="absolute bottom-0 right-0 p-1.5 bg-blue-600 text-white rounded-full border-2 border-white hover:scale-110 transition-transform"
+                  >
+                    <Edit3 size={14} />
+                  </button>
+                </div>
+                <h2 className="mt-4 text-xl font-bold text-slate-900">{userProfile.name}</h2>
+                <p className="text-slate-500 text-sm">{userProfile.email}</p>
+              </div>
+
+              <div className="bg-white rounded-3xl border border-slate-100 overflow-hidden shadow-sm">
+                <div 
+                  onClick={() => setIsProfileModalOpen(true)}
+                  className="p-4 border-b border-slate-50 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><User size={18} /></div>
+                    <span className="font-medium text-slate-700">编辑个人资料</span>
+                  </div>
+                </div>
+                
+                <div 
+                  onClick={handleExport}
+                  className="p-4 border-b border-slate-50 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><Download size={18} /></div>
+                    <span className="font-medium text-slate-700">导出数据备份</span>
+                  </div>
+                  <span className="text-xs text-slate-400">JSON</span>
+                </div>
+
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-4 border-b border-slate-50 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-amber-50 text-amber-600 rounded-lg"><Upload size={18} /></div>
+                    <span className="font-medium text-slate-700">导入数据备份</span>
+                  </div>
+                  <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept=".json" 
+                    onChange={handleImport} 
+                  />
+                </div>
+
+                <div className="p-4 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-slate-50 text-slate-600 rounded-lg"><Settings size={18} /></div>
+                    <span className="font-medium text-slate-700">通用设置</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-6 bg-blue-600 rounded-3xl text-white shadow-xl shadow-blue-200">
+                <h3 className="font-bold text-lg mb-2">升级到 Pro</h3>
+                <p className="text-blue-100 text-sm mb-4">解锁无限订阅追踪、云端同步和更详细的支出分析报告。</p>
+                <button className="w-full py-3 bg-white text-blue-600 font-bold rounded-xl shadow-lg">立即升级</button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      {/* Bottom Navigation */}
+      <nav className="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 z-40 pb-safe">
+        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-around">
+          <button 
+            onClick={() => setCurrentTab('dashboard')}
+            className={cn(
+              "flex flex-col items-center gap-1 transition-colors",
+              currentTab === 'dashboard' ? "text-blue-600" : "text-slate-400"
+            )}
+          >
+            <LayoutDashboard size={24} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">总览</span>
+          </button>
+          <button 
+            onClick={() => setCurrentTab('subscriptions')}
+            className={cn(
+              "flex flex-col items-center gap-1 transition-colors",
+              currentTab === 'subscriptions' ? "text-blue-600" : "text-slate-400"
+            )}
+          >
+            <CreditCard size={24} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">订阅</span>
+          </button>
+          <button 
+            onClick={() => setCurrentTab('profile')}
+            className={cn(
+              "flex flex-col items-center gap-1 transition-colors",
+              currentTab === 'profile' ? "text-blue-600" : "text-slate-400"
+            )}
+          >
+            <User size={24} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">我的</span>
+          </button>
+        </div>
+      </nav>
+
+      <AddSubscriptionModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSave={handleSaveSubscription}
+        initialData={editingSubscription}
+      />
+
+      <ProfileEditModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        onSave={setUserProfile}
+        initialData={userProfile}
+      />
+    </div>
+  );
+}
